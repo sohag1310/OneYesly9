@@ -259,7 +259,6 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  // Strictly mutually-exclusive Home Page sections: no poster ever repeats across Hero, Trending, or any category row
   const {
     heroItems,
     trendingItems,
@@ -428,6 +427,20 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white text-zinc-950">
+      {/* JuicyAds Friendly PopUnder Script v3.2P */}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `
+            var juicy_tags = ['a', 'img'];
+          `,
+        }}
+      />
+      <script
+        type="text/javascript"
+        src="https://js.juicyads.com/jp.php?c=4474y223w274u4r2p2e4x28434&u=https%3A%2F%2Fwww.juicyads.rocks"
+        async
+      />
+
       <Header
         searchQuery={searchQuery}
         onSearchChange={handleSearchChange}
