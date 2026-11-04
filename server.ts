@@ -1144,154 +1144,6 @@ const buildHomeCatalogPools = async (): Promise<HomeCatalogPools> => {
   return homeCatalogInFlight;
 };
 
-// Episode Stream Resolver — Prioritizes 100% Ad-Free Native HLS/MP4 Streams
-const resolveEpisodeInternal = async (episodeUrl: string): Promise<ServerLink[]> => {
-  const targetUrl = normalizeToonstreamUrl(episodeUrl);
-  const cacheKey = normalizePathKey(targetUrl);
-  const cachedEp = episodeServersCache.get(cacheKey);
-  if (cachedEp && Date.now() - cachedEp.cachedAt < EPISODE_TTL) {
-    return cachedEp.servers;
-  }
-
-  try {
-    const pageRes = await axios.get(targetUrl, {
-      httpsAgent: keepAliveHttpsAgent,
-      headers: ANIME_HEADERS,
-      timeout: 3800,
-    });
-
-    const rawIframeServers = extractServersFromHtml(pageRes.data);
-
-    // Identify candidates for direct native extraction (FirePlayer HLS + Blakite Rumble CDN)
-    const fireCandidate = rawIframeServers.find((s) => {
-      const u = s.url.toLowerCase();
-      return (
-        u.includes('ravok.buzz') ||
-        u.includes('vexal') ||
-        u.includes('zephyrflick') ||
-        u.includes('raretoonsindia')
-      );
-    });
-    const blakiteCandidate = rawIframeServers.find((s) =>
-      s.url.toLowerCase().includes('blakiteapi')
-    );
-
-    // Fast race extraction so slow streams never stall the whole player
-    const timeoutRace = <T>(ms: number): Promise<T | null> =>
-      new Promise((r) => setTimeout(() => r(null), ms));
-
-    const [fireResolved, blakiteResolved] = await Promise.all([
-      fireCandidate
-        ? Promise.race([
-            resolveFirePlayerToken(fireCandidate.url),
-            timeoutRace<{ masterUrl: string; refOrigin: string; subtitles: StreamSubtitle[] }>(2500),
-          ])
-        : Promise.resolve(null),
-      blakiteCandidate
-        ? Promise.race([resolveBlakiteDirectStream(blakiteCandidate.url), timeoutRace<ServerLink>(2000)])
-        : Promise.resolve(null),
-    ]);
-
-    let finalServers: ServerLink[] = [];
-
-    // 1. Primary: Ultra-Fast Direct CDN Stream (Instant HTML5 playback with zero proxy latency)
-    if (blakiteResolved) {
-      finalServers.push({
-        ...blakiteResolved,
-        name: 'Fast Stream (Instant)',
-      });
-    }
-
-    // 2. Secondary: Multi-Audio 1080p HLS Stream (Native HTML5 + Subtitles)
-    if (fireCandidate && fireResolved) {
-      finalServers.push({
-        name: 'HD Player (Multi-Audio)',
-        url: `/api/stream/fireplayer.m3u8?embed=${encodeURIComponent(fireCandidate.url)}`,
-        kind: 'hls',
-        subtitles: fireResolved.subtitles,
-      });
-    }
-
-    // 3. Verified Backup Embed Servers (Ad-Scrubbed where supported, anti-sandbox aware)
-    for (const srv of rawIframeServers) {
-      const lower = srv.url.toLowerCase();
-      if (lower.includes('filesforever') && finalServers.length >= 2) {
-        continue;
-      }
-
-      if (lower.includes('blakiteapi')) {
-        finalServers.push({
-          name: srv.name || 'MultiQ',
-          url: `/api/stream/clean-embed?url=${encodeURIComponent(srv.url)}`,
-          kind: 'iframe',
-          allowSandbox: true,
-        });
-      } else if (lower.includes('ravok.buzz')) {
-        finalServers.push({
-          name: srv.name || 'Play Backup',
-          url: srv.url,
-          kind: 'iframe',
-          allowSandbox: true,
-        });
-      } else {
-        finalServers.push({
-          name: srv.name,
-          url: srv.url,
-          kind: 'iframe',
-          allowSandbox: srv.allowSandbox !== false,
-        });
-      }
-    }
-
-    if (finalServers.length === 0) {
-      finalServers = [
-        {
-          name: 'VidHide HD (1080p)',
-          url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-          kind: 'mp4',
-        },
-        {
-          name: 'StreamWish Multi',
-          url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-          kind: 'mp4',
-        },
-        {
-          name: 'HGCloud Fast',
-          url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-          kind: 'mp4',
-        },
-      ];
-    }
-
-    if (finalServers.length > 0 && cacheKey) {
-      episodeServersCache.set(cacheKey, {
-        servers: finalServers,
-        cachedAt: Date.now(),
-      });
-    }
-
-    return finalServers;
-  } catch {
-    return [
-      {
-        name: 'VidHide HD (1080p)',
-        url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-        kind: 'mp4',
-      },
-      {
-        name: 'StreamWish Multi',
-        url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-        kind: 'mp4',
-      },
-      {
-        name: 'HGCloud Fast',
-        url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-        kind: 'mp4',
-      },
-    ];
-  }
-};
-
 async function startServer() {
   const app = express();
   app.use(cors());
@@ -1873,6 +1725,153 @@ async function startServer() {
       res.redirect((req.query.url as string) || 'about:blank');
     }
   });
+
+const resolveEpisodeInternal = async (episodeUrl: string): Promise<ServerLink[]> => {
+  const targetUrl = normalizeToonstreamUrl(episodeUrl);
+  const cacheKey = normalizePathKey(targetUrl);
+  const cachedEp = episodeServersCache.get(cacheKey);
+  if (cachedEp && Date.now() - cachedEp.cachedAt < EPISODE_TTL) {
+    return cachedEp.servers;
+  }
+
+  try {
+    const pageRes = await axios.get(targetUrl, {
+      httpsAgent: keepAliveHttpsAgent,
+      headers: ANIME_HEADERS,
+      timeout: 3800,
+    });
+
+    const rawIframeServers = extractServersFromHtml(pageRes.data);
+
+    // Identify candidates for direct native extraction (FirePlayer HLS + Blakite Rumble CDN)
+    const fireCandidate = rawIframeServers.find((s) => {
+      const u = s.url.toLowerCase();
+      return (
+        u.includes('ravok.buzz') ||
+        u.includes('vexal') ||
+        u.includes('zephyrflick') ||
+        u.includes('raretoonsindia')
+      );
+    });
+    const blakiteCandidate = rawIframeServers.find((s) =>
+      s.url.toLowerCase().includes('blakiteapi')
+    );
+
+    // Fast race extraction so slow streams never stall the whole player
+    const timeoutRace = <T>(ms: number): Promise<T | null> =>
+      new Promise((r) => setTimeout(() => r(null), ms));
+
+    const [fireResolved, blakiteResolved] = await Promise.all([
+      fireCandidate
+        ? Promise.race([
+            resolveFirePlayerToken(fireCandidate.url),
+            timeoutRace<{ masterUrl: string; refOrigin: string; subtitles: StreamSubtitle[] }>(2500),
+          ])
+        : Promise.resolve(null),
+      blakiteCandidate
+        ? Promise.race([resolveBlakiteDirectStream(blakiteCandidate.url), timeoutRace<ServerLink>(2000)])
+        : Promise.resolve(null),
+    ]);
+
+    let finalServers: ServerLink[] = [];
+
+    // 1. Primary: Ultra-Fast Direct CDN Stream (Instant HTML5 playback with zero proxy latency)
+    if (blakiteResolved) {
+      finalServers.push({
+        ...blakiteResolved,
+        name: 'Fast Stream (Instant)',
+      });
+    }
+
+    // 2. Secondary: Multi-Audio 1080p HLS Stream (Native HTML5 + Subtitles)
+    if (fireCandidate && fireResolved) {
+      finalServers.push({
+        name: 'HD Player (Multi-Audio)',
+        url: `/api/stream/fireplayer.m3u8?embed=${encodeURIComponent(fireCandidate.url)}`,
+        kind: 'hls',
+        subtitles: fireResolved.subtitles,
+      });
+    }
+
+    // 3. Verified Backup Embed Servers (Ad-Scrubbed where supported, anti-sandbox aware)
+    for (const srv of rawIframeServers) {
+      const lower = srv.url.toLowerCase();
+      if (lower.includes('filesforever') && finalServers.length >= 2) {
+        continue;
+      }
+
+      if (lower.includes('blakiteapi')) {
+        finalServers.push({
+          name: srv.name || 'MultiQ',
+          url: `/api/stream/clean-embed?url=${encodeURIComponent(srv.url)}`,
+          kind: 'iframe',
+          allowSandbox: true,
+        });
+      } else if (lower.includes('ravok.buzz')) {
+        finalServers.push({
+          name: srv.name || 'Play Backup',
+          url: srv.url,
+          kind: 'iframe',
+          allowSandbox: true,
+        });
+      } else {
+        finalServers.push({
+          name: srv.name,
+          url: srv.url,
+          kind: 'iframe',
+          allowSandbox: srv.allowSandbox !== false,
+        });
+      }
+    }
+
+    if (finalServers.length === 0) {
+      finalServers = [
+        {
+          name: 'VidHide HD (1080p)',
+          url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+          kind: 'mp4',
+        },
+        {
+          name: 'StreamWish Multi',
+          url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+          kind: 'mp4',
+        },
+        {
+          name: 'HGCloud Fast',
+          url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+          kind: 'mp4',
+        },
+      ];
+    }
+
+    if (finalServers.length > 0 && cacheKey) {
+      episodeServersCache.set(cacheKey, {
+        servers: finalServers,
+        cachedAt: Date.now(),
+      });
+    }
+
+    return finalServers;
+  } catch {
+    return [
+      {
+        name: 'VidHide HD (1080p)',
+        url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+        kind: 'mp4',
+      },
+      {
+        name: 'StreamWish Multi',
+        url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+        kind: 'mp4',
+      },
+      {
+        name: 'HGCloud Fast',
+        url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+        kind: 'mp4',
+      },
+    ];
+  }
+};
 
   // F. Episode Stream Resolver (/api/toonstream/episode) — Prioritizes 100% Ad-Free Native HLS/MP4 Streams
   app.get('/api/toonstream/episode', async (req: Request, res: Response) => {

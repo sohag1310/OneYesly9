@@ -278,34 +278,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             setAudioTracks([]);
             return;
           }
-          const tracks = hls.audioTracks.map((t, idx) => ({
-            id: idx,
-            name: t.name || t.lang || `Audio ${idx + 1}`,
-          }));
-          setAudioTracks(tracks);
-
-          // Auto-select Hindi track on first load (before user manually changes)
-          const currentTrackId = hls.audioTrack;
-          const currentTrackName = (hls.audioTracks[currentTrackId]?.name || '').toLowerCase();
-          const isAlreadyHindi =
-            currentTrackName.includes('hindi') ||
-            currentTrackName.includes('hin') ||
-            currentTrackName === 'hi';
-
-          if (!isAlreadyHindi) {
-            const hindiIdx = hls.audioTracks.findIndex((t) => {
-              const n = (t.name || t.lang || '').toLowerCase();
-              return n.includes('hindi') || n.includes('hin') || n === 'hi';
-            });
-            if (hindiIdx >= 0) {
-              hls.audioTrack = hindiIdx;
-              setSelectedAudioId(hindiIdx);
-              return;
-            }
-          }
-
-          if (currentTrackId >= 0) {
-            setSelectedAudioId(currentTrackId);
+          setAudioTracks(
+            hls.audioTracks.map((t, idx) => ({
+              id: idx,
+              name: t.name || t.lang || `Audio ${idx + 1}`,
+            }))
+          );
+          if (hls.audioTrack >= 0) {
+            setSelectedAudioId(hls.audioTrack);
           }
         };
 
